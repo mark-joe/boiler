@@ -32,6 +32,7 @@ def which_pico(wlan):
     if mac == 'D8:3A:DD:9D:67:B5': id = 'PicoW-11'
     if mac == 'D8:3A:DD:9D:57:29': id = 'PicoW-12'
     if mac == 'D8:3A:DD:9E:74:37': id = 'PicoW-13'
+    if mac == '2C:CF:67:DB:E8:DA': id = 'PicoW-14'
     return(id)
 
 def get_datetime(unix=None):

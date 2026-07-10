@@ -21,8 +21,14 @@ def connectWiFi(ssid,password,country='NL'):
 #   print(wlan.config('essid'))
 #   print(wlan.config('txpower'))
 
+# this is new. set active to False to settle down
+   wlan.active(False)
+   time.sleep(1)
+    
    wlan.active(True)
-   wlan.config(pm = 0xa11140) # power save off ?
+   time.sleep(1)
+   wlan.config(pm = 0xa11140) # power save off, after active == True
+
    accessPoints = wlan.scan()
    for ap in accessPoints:
        print(ap)
