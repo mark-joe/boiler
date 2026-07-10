@@ -12,7 +12,7 @@ import json
 import collections
 import math
 
-VERSION = '20250613'
+VERSION = '20251106'
 DEBUG = False
 
 PROJECT = 'boiler'
@@ -23,7 +23,7 @@ if DEBUG:
     use_WDT = False
 HEATING_POWER = 1150
 NTP_UPDATE_INTERVAL = 86400 # number of seconds
-USE_SALDERING = True  # make sure boiler is warm at six pm anyway
+USE_SALDERING = True  # make sure boiler is warm at minmum of sunset-3600 or LT1800
 TARGET_TEMP = 75.0
 
 def mqtt_connect(): 
@@ -43,7 +43,7 @@ def sub_cb(topic, msg):
     global last_production_value
     global p1_timestamp, p1_timestamp_utc
     global last_p1_message
-#    global updown
+    global updown
         
     if use_WDT: wdt.feed()
     if topic.decode('utf-8') == 'p1monitor/smartmeter/production_kw':
@@ -54,8 +54,8 @@ def sub_cb(topic, msg):
         p1_timestamp = msg.decode('utf-8')
     if topic.decode('utf-8') == 'p1monitor/smartmeter/timestamp_utc':
         p1_timestamp_utc = int(msg)
-#    if topic.decode('utf-8') == 'sun/updown':
-#        updown = json.loads(msg)        
+    if topic.decode('utf-8') == 'sun/updown':
+        updown = json.loads(msg)        
             
     if DEBUG: print("New message on topic {}".format(topic.decode('utf-8')))
     if DEBUG: print("Message: {}".format(msg.decode('utf-8')))
@@ -104,8 +104,9 @@ last_production_value = 0
 p1_timestamp = ''
 p1_timestamp_utc = utime.time()
 last_p1_message = utime.time()
-# updown = None
+updown = None
 start_time_string = ''
+evening_switch_string = ''
 
 client.set_callback(sub_cb)
 topic_sub = b'p1monitor/smartmeter/production_kw'
@@ -114,8 +115,8 @@ topic_sub = b'p1monitor/smartmeter/timestamp_local'
 client.subscribe(topic_sub, qos=0)
 topic_sub = b'p1monitor/smartmeter/timestamp_utc'
 client.subscribe(topic_sub, qos=0)
-# topic_sub = b'sun/updown'
-# client.subscribe(topic_sub, qos=0)
+topic_sub = b'sun/updown'
+client.subscribe(topic_sub, qos=0)
 wdt = None
 if use_WDT: wdt = WDT(timeout=5000)  # max 8388 millisecs
 last_publish = utime.time()     # in seconds
@@ -138,7 +139,7 @@ while True:  # loop takes about 2 seconds
     if use_WDT: wdt.feed()
 
     diff_publish = utime.time() - last_publish
-    if diff_publish > (keepalive / 10):
+    if diff_publish > (keepalive / 40):
         if DEBUG: print("time for a publish", diff_publish)
         last_publish = utime.time()
         client.publish("%s/last_boot"%PROJECT, last_boot, retain=False, qos=0)
@@ -154,8 +155,7 @@ while True:  # loop takes about 2 seconds
         client.publish("%s/solar_ok"%PROJECT, str(int(SOLAR_OK)), retain=False, qos=0)
         client.publish("%s/heating_on"%PROJECT, str(onoff), retain=False, qos=0)
         client.publish("%s/start_time"%PROJECT, start_time_string, retain=False, qos=0)
-#        if updown != None:
-#            client.publish("%s/sunset"%PROJECT, updown['sunset'] + ' (UTC)', retain=False, qos=0)
+        if updown != None: client.publish("%s/sunset"%PROJECT, updown['sunset'] + ' (UTC)', retain=False, qos=0)
         client.publish("%s/SALDERING_ON"%PROJECT, str(int(SALDERING_ON)), retain=False, qos=0)
 
         dic = collections.OrderedDict()
@@ -173,13 +173,13 @@ while True:  # loop takes about 2 seconds
         dic['solar_ok']=SOLAR_OK
         dic['heating_on']=onoff
         dic['start_time']= start_time_string
-#        if updown != None:
-#            dic['sunset']=updown['sunset'] + ' (UTC)'
+        if updown != None: dic['sunset']=updown['sunset'] + ' (UTC)'
         dic['SALDERING_ON']=SALDERING_ON
+        dic['EVENING_SWITCH']=evening_switch_string
 
         s = json.dumps(dic)
         client.publish("%s/json"%PROJECT, s, retain=False, qos=1) # QOS set to 1 to verify connection
-	
+
     if len(roms)>0:
         try:
             ds.convert_temp()  # max 750 ms it takes
@@ -225,21 +225,30 @@ while True:  # loop takes about 2 seconds
         fp.write("ntp post update: delta:%d " % delta + date + " " + tme + ' (UTC) \n')
         fp.close()
 
-# First switch on/off based on saldering (heat boiler before 18 pm, buy no earlier than required)
+# First switch on/off based on saldering (heat boiler before EVENING_SWITCH, buy no earlier than required)
 # Secondly, if prod OK, set on
 
     SALDERING_ON = False
     start_time_string = "no need to heat"
     if USE_SALDERING: 
         LT18h = math.floor(unix_time / 86400) * 86400 + 17 * 3600 - int(is_dst()) * 3600
-        joules = (TARGET_TEMP - temp) * 4.2 * 80 * 1000
+        EVENING_SWITCH = LT18h
+        if updown != None:
+            sunset_unix = updown['sunset_unix'] - 3600
+        else:
+            sunset_unix = LT18h
+        if sunset_unix < EVENING_SWITCH: EVENING_SWITCH = sunset_unix
+        (d,t) = get_datetime(EVENING_SWITCH)
+        evening_switch_string = d + " " + t + " (UTC)"
+
+        joules = (TARGET_TEMP - temp) * 4.2 * 80 * 1000 * 1.1
         if joules < 0.0: joules = 0.0
         seconds_to_heat = int(joules / HEATING_POWER)
         if seconds_to_heat > 0:
-            start_time = LT18h - seconds_to_heat # - 3600
+            start_time = EVENING_SWITCH - seconds_to_heat 
             (d,t) = get_datetime(start_time)
             start_time_string = d + " " + t + " (UTC)"
-            if unix_time > start_time and unix_time < LT18h: SALDERING_ON = True
+            if unix_time > start_time and unix_time < EVENING_SWITCH: SALDERING_ON = True
             
     if prod > HEATING_POWER: 
         SOLAR_OK_COUNTER = SOLAR_OK_COUNTER + 1

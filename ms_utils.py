@@ -43,16 +43,42 @@ def get_datetime(unix=None):
     tme = "%02d:%02d:%02d" % (hour, mins, secs)
     return (date,tme)
 
-def is_dst():
-	year, month, day, hour, mins, secs, weekday, yearday = time.gmtime()
-	if month < 3 or month > 10: return False
-	if month > 3 or month < 10: return True
-	prevSunday = day - weekday
-	if month == 3: return (prevSunday >= 25)
-	if month == 10: return (prevSunday < 25)
+# def is_dst():
+# 	year, month, day, hour, mins, secs, weekday, yearday = time.gmtime()
+# 	if month < 3 or month > 10: return False
+# 	if month > 3 and month < 10: return True
+# 	prevSunday = day - weekday
+# 	if month == 3: return (prevSunday >= 25)
+# 	if month == 10: return (prevSunday < 25)
    
 def set_SMPS_PWM():
     SMPS = Pin("WL_GPIO1", Pin.OUT)  # sets power save (PS) off (TP4)
     SMPS.on() 
 
+def last_sunday(year, month):
+    # Find the last Sunday of a given month/year
+    # Start from the last day of the month and go backwards
+    for day in range(31, 0, -1):
+        try:
+            t = time.gmtime(time.mktime((year, month, day, 0, 0, 0, 0, 0)))
+            if t[6] == 6:  # Sunday (0=Mon ... 6=Sun)
+                return day
+        except:
+            continue
+    return None
 
+def is_dst():
+    now = time.gmtime() # UTC
+    year, month, day, hour = now[0], now[1], now[2], now[3]
+
+    start_day = last_sunday(year, 3)
+    end_day = last_sunday(year, 10)
+
+    start = (year, 3, start_day, 1, 0, 0, 0, 0)
+    end   = (year, 10, end_day, 1, 0, 0, 0, 0)
+
+    now_secs   = time.mktime((year, month, day, hour, 0, 0, 0, 0))
+    start_secs = time.mktime(start)
+    end_secs   = time.mktime(end)
+
+    return start_secs <= now_secs < end_secs
